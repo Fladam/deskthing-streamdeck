@@ -84,6 +84,27 @@ const App: React.FC = () => {
       claimDial();
     };
 
+    // DeskThing never focuses the app's frame, so hardware key presses (the dial press)
+    // would go to DeskThing's window and this app would never see the dial menu open.
+    // Hold keyboard focus here whenever the dial menu isn't open; key presses are still
+    // forwarded to DeskThing by the SDK, so its other button mappings keep working.
+    let refocusTimer: number | undefined;
+    const grabFocus = () => {
+      if (menuOpen || document.hasFocus()) return;
+      try {
+        window.focus();
+      } catch {
+        // ignore
+      }
+    };
+    const onBlur = () => {
+      if (menuOpen) return; // focus was handed to DeskThing on purpose
+      window.clearTimeout(refocusTimer);
+      refocusTimer = window.setTimeout(grabFocus, 100);
+    };
+    const focusPoll = window.setInterval(grabFocus, 1000);
+    grabFocus();
+
     const applySettings = (s?: AppSettings | null) => {
       const v = s?.[DIAL_PAGES_SETTING]?.value;
       dialPages = v !== false;
@@ -124,7 +145,7 @@ const App: React.FC = () => {
     window.addEventListener("wheel", onWheel);
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", closeMenu, true);
-    window.addEventListener("focus", closeMenu);
+    window.addEventListener("blur", onBlur);
 
     send({ type: DECK_MSG, request: "getView" });
 
@@ -135,7 +156,9 @@ const App: React.FC = () => {
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", closeMenu, true);
-      window.removeEventListener("focus", closeMenu);
+      window.removeEventListener("blur", onBlur);
+      window.clearTimeout(refocusTimer);
+      window.clearInterval(focusPoll);
       DeskThing.restoreKeys([...topButtons, "wheel"]);
     };
   }, []);

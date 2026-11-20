@@ -32,7 +32,8 @@ The port can be changed in the app's DeskThing settings. The configurator only l
 | Control | Does |
 |---|---|
 | Tap button | Run its action (white flash = ok, red = failed + error shown at bottom) |
-| Dial | Previous / next page |
+| Dial turn | Previous / next page (can be turned off with the "Dial turns pages" app setting in DeskThing) |
+| Dial press | Opens DeskThing's dial menu as usual; turning and pressing then control that menu. Tap the screen to give the dial back to the pages |
 | Top buttons 1–4 | Jump to page 1–4 |
 | Back | Left to DeskThing (exit app) |
 | ⚙ (bottom right) | Open the configurator in the PC's browser |

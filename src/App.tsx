@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DeskThing } from "@deskthing/client";
-import { DECK_MSG, type ButtonView, type DeckView, type ServerToClient } from "../shared/types";
+import { DEVICE_CLIENT, type AppSettings } from "@deskthing/types";
+import { DECK_MSG, DIAL_PAGES_SETTING, type ButtonView, type DeckView, type ServerToClient } from "../shared/types";
 import { ButtonFace, PageIndicator } from "./components/ButtonFace";
 
 type Flash = "ok" | "error";
@@ -43,11 +44,53 @@ const App: React.FC = () => {
   const [flashes, setFlashes] = useState<Record<string, Flash>>({});
   const [error, setError] = useState<string | null>(null);
   const errorTimer = useRef<number>();
+  /** DeskThing's dial menu was opened from here; dial input currently belongs to DeskThing. */
+  const [dialMenu, setDialMenu] = useState(false);
 
   useEffect(() => {
-    // Dial turns pages; top buttons 1-4 jump to pages 1-4. Back (Escape) is left to DeskThing.
-    const overridden = ["wheel", "Digit1", "Digit2", "Digit3", "Digit4"];
-    DeskThing.overrideKeys(overridden);
+    // Top buttons 1-4 jump to pages 1-4. Back (Escape) and dial presses are left to DeskThing.
+    const topButtons = ["Digit1", "Digit2", "Digit3", "Digit4"];
+    DeskThing.overrideKeys(topButtons);
+
+    // Dial turns flip pages, except while DeskThing's dial menu (selection wheel) is open:
+    // then the turns must reach DeskThing so the wheel rotates.
+    let dialPages = true;
+    let menuOpen = false;
+    const claimDial = () => {
+      if (dialPages && !menuOpen) DeskThing.overrideKeys(["wheel"]);
+      else DeskThing.restoreKeys(["wheel"]);
+    };
+    claimDial();
+
+    const openMenu = () => {
+      // The SDK has already forwarded this press, so DeskThing is opening its wheel.
+      menuOpen = true;
+      setDialMenu(true);
+      claimDial();
+      // Hand keyboard focus to DeskThing's window so the next dial press selects in
+      // the wheel (presses inside this app would only re-open it).
+      try {
+        window.parent.focus();
+      } catch {
+        // not embedded (e.g. local dev); nothing to hand focus to
+      }
+    };
+    const closeMenu = () => {
+      // DeskThing doesn't report when the wheel closes; a touch or focus returning here means
+      // the user is back in this app.
+      if (!menuOpen) return;
+      menuOpen = false;
+      setDialMenu(false);
+      claimDial();
+    };
+
+    const applySettings = (s?: AppSettings | null) => {
+      const v = s?.[DIAL_PAGES_SETTING]?.value;
+      dialPages = v !== false;
+      claimDial();
+    };
+    DeskThing.getSettings().then(applySettings, () => {});
+    const offSettings = DeskThing.on(DEVICE_CLIENT.SETTINGS, (data) => applySettings(data.payload as AppSettings));
 
     const offView = DeskThing.on("view", (data) => {
       setView((data as unknown as Extract<ServerToClient, { type: "view" }>).payload);
@@ -66,6 +109,7 @@ const App: React.FC = () => {
 
     let lastWheel = 0;
     const onWheel = (e: WheelEvent) => {
+      if (!dialPages || menuOpen) return; // DeskThing handles the dial
       const now = Date.now();
       if (now - lastWheel < 200) return; // one page per dial "click"
       lastWheel = now;
@@ -73,20 +117,26 @@ const App: React.FC = () => {
       send({ type: DECK_MSG, request: "page", payload: { delta } });
     };
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Enter" && !e.repeat) return openMenu();
       const m = /^Digit([1-4])$/.exec(e.code);
       if (m) send({ type: DECK_MSG, request: "page", payload: { index: Number(m[1]) - 1 } });
     };
     window.addEventListener("wheel", onWheel);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", closeMenu, true);
+    window.addEventListener("focus", closeMenu);
 
     send({ type: DECK_MSG, request: "getView" });
 
     return () => {
       offView();
       offResult();
+      offSettings();
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKey);
-      DeskThing.restoreKeys(overridden);
+      window.removeEventListener("pointerdown", closeMenu, true);
+      window.removeEventListener("focus", closeMenu);
+      DeskThing.restoreKeys([...topButtons, "wheel"]);
     };
   }, []);
 
@@ -119,6 +169,8 @@ const App: React.FC = () => {
       <div className="relative h-6 flex items-center justify-center text-neutral-400 text-base">
         {error ? (
           <span className="text-red-400 truncate px-10">{error}</span>
+        ) : dialMenu ? (
+          <span className="text-sky-300 truncate px-10">Dial controls DeskThing · tap the screen to return</span>
         ) : (
           <PageIndicator name={view.pageName} index={view.pageIndex} count={view.pageCount} inFolder={view.inFolder} />
         )}

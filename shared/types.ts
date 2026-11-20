@@ -194,5 +194,8 @@ export const LIMITS = {
 
 export const DEFAULT_CONFIG_PORT = 8899;
 
+/** DeskThing app setting (boolean): whether turning the dial flips pages. */
+export const DIAL_PAGES_SETTING = "dialPages";
+
 /** Ports DeskThing itself uses (device connection, OAuth callback). Never bind these. */
 export const RESERVED_PORTS: readonly number[] = [8891, 8888];

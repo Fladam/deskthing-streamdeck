@@ -1,6 +1,6 @@
 import { DeskThing } from "@deskthing/server";
 import { DESKTHING_EVENTS, SETTING_TYPES, type AppSettings } from "@deskthing/types";
-import { DECK_MSG, DEFAULT_CONFIG_PORT, RESERVED_PORTS, type ClientToServer } from "../shared/types";
+import { DECK_MSG, DEFAULT_CONFIG_PORT, DIAL_PAGES_SETTING, RESERVED_PORTS, type ClientToServer } from "../shared/types";
 import { openUrl } from "./actions";
 import { configuratorUrl, startConfigServer, stopConfigServer } from "./configServer";
 import { changePage, goToPage, initDeck, press, sendView, stopDeck } from "./deck";
@@ -39,6 +39,14 @@ const start = async () => {
       value: DEFAULT_CONFIG_PORT,
       min: 1024,
       max: 65535,
+    },
+    [DIAL_PAGES_SETTING]: {
+      id: DIAL_PAGES_SETTING,
+      type: SETTING_TYPES.BOOLEAN,
+      label: "Dial turns pages",
+      description:
+        "Turning the dial flips StreamDeck pages. Pressing the dial still opens DeskThing's dial menu. Turn off to leave the dial entirely to DeskThing.",
+      value: true,
     },
   };
   await DeskThing.deleteSettings(LEGACY_PORT_SETTING).catch(() => {});

@@ -13,6 +13,7 @@ import { RESERVED_PORTS } from "../shared/types";
 import configuratorHtml from "./generated/configuratorHtml";
 import { ValidationError, validateAction, validateProfile, validateSettingsUpdate } from "../shared/validate";
 import { saveProfile, testAction } from "./deck";
+import { defaultProfile } from "./defaultProfile";
 import { obs } from "./obs";
 import { getProfile, getSettings, publicSettings, updateSettings } from "./store";
 
@@ -105,6 +106,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, port:
       sendJson(res, 200, profile);
       return;
     }
+
+    case "GET /api/defaults":
+      sendJson(res, 200, defaultProfile);
+      return;
 
     case "GET /api/settings":
       sendJson(res, 200, publicSettings());

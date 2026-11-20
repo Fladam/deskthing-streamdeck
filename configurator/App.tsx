@@ -4,7 +4,7 @@ import { api } from "./api";
 import { GridEditor } from "./components/GridEditor";
 import { Inspector } from "./components/Inspector";
 import { ObsBadge, SettingsDialog } from "./components/SettingsDialog";
-import { blankButton, blankFolder, blankPage, cloneButton, removeFolderRefs, resizeGrid, type EditorContext } from "./model";
+import { addTemplatePage, blankButton, blankFolder, blankPage, cloneButton, removeFolderRefs, resizeGrid, type EditorContext } from "./model";
 
 type SaveState = { state: "idle" | "saving" | "saved" | "error"; msg?: string };
 type Kind = "page" | "folder";
@@ -33,6 +33,7 @@ export default function App() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [obsStatus, setObsStatus] = useState<ObsStatus | null>(null);
+  const [defaults, setDefaults] = useState<ProfileConfig | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -53,6 +54,7 @@ export default function App() {
   useEffect(() => {
     void load();
     refreshObs();
+    api.getDefaults().then(setDefaults, () => setDefaults(null));
     const t = setInterval(refreshObs, 3000);
     return () => clearInterval(t);
   }, [load, refreshObs]);
@@ -182,6 +184,14 @@ export default function App() {
     const created = kind === "page" ? blankPage(slots, list.length + 1) : blankFolder(slots, list.length + 1);
     setProfile(withList(profile, kind, [...list, created]));
     goTo({ kind, index: list.length });
+  };
+
+  const addFromTemplate = (index: number) => {
+    if (!defaults || profile.pages.length >= LIMITS.maxPages) return;
+    const next = addTemplatePage(profile, defaults, index);
+    if ((next.folders?.length ?? 0) > LIMITS.maxFolders) return alert("Too many folders to add this page.");
+    setProfile(next);
+    goTo({ kind: "page", index: next.pages.length - 1 });
   };
 
   const deleteView = (v: ViewRef) => {
@@ -341,6 +351,19 @@ export default function App() {
               <span className="w-16 text-xs uppercase tracking-wide text-neutral-500">Pages</span>
               {profile.pages.map((p, i) => tab({ kind: "page", index: i }, `${i + 1}. ${p.name}`, p.name))}
               <button className="btn" onClick={() => addView("page")}>+ Page</button>
+              {defaults && (
+                <select
+                  className="field w-auto"
+                  value=""
+                  title="Add a copy of one of the built-in pages"
+                  onChange={(e) => e.target.value !== "" && addFromTemplate(Number(e.target.value))}
+                >
+                  <option value="">+ From template…</option>
+                  {defaults.pages.map((p, i) => (
+                    <option key={p.id} value={i}>{p.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="w-16 text-xs uppercase tracking-wide text-neutral-500">Folders</span>

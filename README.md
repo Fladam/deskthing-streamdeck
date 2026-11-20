@@ -81,6 +81,12 @@ A button can have an `onState` (label / icon / image / colors) shown while it's 
 
 In OBS 28+: **Tools → WebSocket Server Settings → Enable WebSocket server**. Then in the configurator open **⚙ Settings**, tick *Connect to OBS*, and enter the port/password from OBS's "Show Connect Info". The status badge in the header shows whether it's connected. The deck reconnects automatically when OBS starts.
 
+### Page templates
+
+**+ From template…** next to "+ Page" adds a copy of a built-in page (Media, Tools, OBS) to your layout, including any folder it uses, fitted to your grid size. Use it to get pages that were added in a newer version without resetting your own layout.
+
+The built-in **OBS** page uses OBS's default names (`Mic/Aux`, `Desktop Audio`, scene `Scene`). Rename them to match your setup.
+
 ### Folders and navigation
 
 Folders are pages that aren't in the dial rotation. A button with **Open folder** shows one, and **Back** returns. Turning the dial or pressing a top button inside a folder leaves it.

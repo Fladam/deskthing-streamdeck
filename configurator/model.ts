@@ -156,3 +156,65 @@ export function describeAction(a: ActionConfig | StepConfig, ctx?: EditorContext
     default: return "No action";
   }
 }
+
+/**
+ * Copy page `index` of a template profile into `target`, with fresh ids, the
+ * folders it opens (recursively), and re-gridded to the target's size.
+ */
+export function addTemplatePage(target: ProfileConfig, template: ProfileConfig, index: number): ProfileConfig {
+  const fitted = resizeGrid(template, target.cols, target.rows).profile;
+  const tplFolders = fitted.folders ?? [];
+  const folderMap = new Map<string, string>();
+
+  const collect = (page: PageConfig) => {
+    for (const b of page.buttons) {
+      if (!b) continue;
+      for (const a of [b.action, b.onState?.action, ...(b.action.type === "multi" ? b.action.steps : [])]) {
+        if (a?.type === "folder" && !folderMap.has(a.folderId)) {
+          const f = tplFolders.find((x) => x.id === a.folderId);
+          if (f) {
+            folderMap.set(a.folderId, newId("f"));
+            collect(f);
+          }
+        }
+      }
+    }
+  };
+  const remap = <T extends ActionConfig | StepConfig>(a: T): T => {
+    if (a.type === "folder") return { ...a, folderId: folderMap.get(a.folderId) ?? a.folderId } as T;
+    if (a.type === "multi") return { ...a, steps: a.steps.map(remap) } as T;
+    return a;
+  };
+  const copyPage = (p: PageConfig, id: string): PageConfig => ({
+    id,
+    name: p.name,
+    buttons: p.buttons.map(
+      (b) =>
+        b && {
+          ...structuredClone(b),
+          id: newId("b"),
+          action: remap(structuredClone(b.action)),
+          onState: b.onState && { ...structuredClone(b.onState), action: b.onState.action && remap(structuredClone(b.onState.action)) },
+        }
+    ),
+  });
+
+  const page = fitted.pages[index];
+  collect(page);
+  const taken = new Set((target.folders ?? []).map((f) => f.name));
+  const uniqueName = (name: string) => {
+    let n = name;
+    for (let i = 2; taken.has(n); i++) n = `${name} ${i}`;
+    taken.add(n);
+    return n;
+  };
+  const newFolders = [...folderMap].map(([oldId, nid]) => {
+    const copy = copyPage(tplFolders.find((f) => f.id === oldId)!, nid);
+    return { ...copy, name: uniqueName(copy.name) };
+  });
+  return {
+    ...target,
+    pages: [...target.pages, copyPage(page, newId("p"))],
+    folders: [...(target.folders ?? []), ...newFolders],
+  };
+}

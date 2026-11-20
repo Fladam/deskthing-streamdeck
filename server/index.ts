@@ -1,15 +1,20 @@
 import { DeskThing } from "@deskthing/server";
 import { DESKTHING_EVENTS, SETTING_TYPES, type AppSettings } from "@deskthing/types";
-import { DECK_MSG, DEFAULT_CONFIG_PORT, type ClientToServer } from "../shared/types";
+import { DECK_MSG, DEFAULT_CONFIG_PORT, RESERVED_PORTS, type ClientToServer } from "../shared/types";
 import { openUrl } from "./actions";
 import { configuratorUrl, startConfigServer, stopConfigServer } from "./configServer";
 import { changePage, goToPage, loadProfile, press, sendView } from "./deck";
 import { inputHelper } from "./win/input";
 
-const PORT_SETTING = "configPort";
+const PORT_SETTING = "configuratorPort";
+/** v0.2.0 stored the port under this id with a default (8891) that collides with DeskThing. */
+const LEGACY_PORT_SETTING = "configPort";
 
 async function applyPort(port: unknown) {
-  const p = typeof port === "number" && Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : DEFAULT_CONFIG_PORT;
+  const valid =
+    typeof port === "number" && Number.isInteger(port) && port >= 1024 && port <= 65535 && !RESERVED_PORTS.includes(port);
+  if (!valid && port !== undefined) console.warn(`Configurator port ${String(port)} is not allowed, using ${DEFAULT_CONFIG_PORT}`);
+  const p = valid ? (port as number) : DEFAULT_CONFIG_PORT;
   try {
     await startConfigServer(p);
   } catch (e) {
@@ -32,6 +37,7 @@ const start = async () => {
       max: 65535,
     },
   };
+  await DeskThing.deleteSettings(LEGACY_PORT_SETTING).catch(() => {});
   await DeskThing.initSettings(settings);
   const current = await DeskThing.getSettings();
   await applyPort(current?.[PORT_SETTING]?.value);

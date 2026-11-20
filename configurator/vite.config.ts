@@ -21,7 +21,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/api": {
-        target: "http://localhost:8891",
+        target: "http://localhost:8899",
         changeOrigin: true,
         configure: (proxy) => proxy.on("proxyReq", (req) => req.removeHeader("origin")),
       },

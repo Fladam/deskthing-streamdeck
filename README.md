@@ -7,7 +7,7 @@ A Stream Deck-style button grid for [DeskThing](https://github.com/ItsRiprod/Des
 ```sh
 npm install
 npm run dev               # DeskThing CLI dev mode (emulator + Vite)
-npm run dev:configurator  # hot-reload configurator UI on :5174 (proxies /api to a running app on :8891)
+npm run dev:configurator  # hot-reload configurator UI on :5174 (proxies /api to a running app on :8899)
 npm run typecheck         # client + server + configurator type checks
 npm run build             # -> dist/deskthing-streamdeck-v<version>.zip
 ```
@@ -16,7 +16,7 @@ Install the zip from the DeskThing Server app (Downloads → upload app).
 
 ## Configuring buttons
 
-While the app is running in DeskThing, open **http://localhost:8891/** on your PC (or tap ⚙ on the device to open it there). You can:
+While the app is running in DeskThing, open **http://localhost:8899/** on your PC (or tap ⚙ on the device to open it there). You can:
 
 - click **+** to add a button, click a button to edit it, and drag to move or swap
 - set a label, emoji or uploaded image, colors, and the action, with **Test on PC** to try it

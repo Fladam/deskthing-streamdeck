@@ -106,4 +106,7 @@ export const LIMITS = {
   maxImage: 300_000,
 } as const;
 
-export const DEFAULT_CONFIG_PORT = 8891;
+export const DEFAULT_CONFIG_PORT = 8899;
+
+/** Ports DeskThing itself uses (device connection, OAuth callback). Never bind these. */
+export const RESERVED_PORTS: readonly number[] = [8891, 8888];

@@ -8,6 +8,8 @@
 //    preflight, which we never approve).
 
 import http from "node:http";
+import net from "node:net";
+import { RESERVED_PORTS } from "../shared/types";
 import configuratorHtml from "./generated/configuratorHtml";
 import { ValidationError, validateAction, validateProfile } from "../shared/validate";
 import { getProfile, saveProfile, testAction } from "./deck";
@@ -115,9 +117,33 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, port:
   }
 }
 
-export function startConfigServer(port: number): Promise<void> {
-  if (server && currentPort === port) return Promise.resolve();
+/**
+ * True if something already accepts connections on localhost:<port>.
+ * Needed because Windows lets us bind 127.0.0.1:<port> even when another
+ * process (e.g. DeskThing itself) listens on 0.0.0.0/:: with that port,
+ * and we would then silently steal its localhost traffic.
+ */
+function portIsTaken(port: number): Promise<boolean> {
+  const probe = (host: string) =>
+    new Promise<boolean>((resolve) => {
+      const sock = net.connect({ host, port });
+      const done = (taken: boolean) => {
+        sock.destroy();
+        resolve(taken);
+      };
+      sock.setTimeout(500, () => done(false));
+      sock.once("connect", () => done(true));
+      sock.once("error", () => done(false));
+    });
+  return Promise.all([probe("127.0.0.1"), probe("::1")]).then((r) => r.some(Boolean));
+}
+
+export async function startConfigServer(port: number): Promise<void> {
+  if (server && currentPort === port) return;
   stopConfigServer();
+
+  if (RESERVED_PORTS.includes(port)) throw new Error(`Port ${port} is used by DeskThing itself`);
+  if (await portIsTaken(port)) throw new Error(`Port ${port} is already in use by another program`);
 
   const srv = http.createServer((req, res) => {
     handle(req, res, port).catch((e: unknown) => {

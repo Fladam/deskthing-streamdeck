@@ -103,9 +103,9 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="w-screen h-screen bg-black flex flex-col p-3 gap-2 overflow-hidden">
+    <div className="w-screen h-screen bg-black flex flex-col p-3 overflow-hidden">
       <div
-        className="flex-1 grid gap-3 min-h-0"
+        className="flex-1 grid gap-3 min-h-0 mb-2"
         style={{
           gridTemplateColumns: `repeat(${view.cols}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${view.rows}, minmax(0, 1fr))`,
@@ -120,7 +120,7 @@ const App: React.FC = () => {
         {error ? (
           <span className="text-red-400 truncate px-10">{error}</span>
         ) : (
-          <PageIndicator name={view.pageName} index={view.pageIndex} count={view.pageCount} />
+          <PageIndicator name={view.pageName} index={view.pageIndex} count={view.pageCount} inFolder={view.inFolder} />
         )}
         <button
           className="absolute right-0 h-8 w-10 -my-1 flex items-center justify-center text-xl text-neutral-500 active:text-white"

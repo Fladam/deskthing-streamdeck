@@ -3,7 +3,9 @@ import { DESKTHING_EVENTS, SETTING_TYPES, type AppSettings } from "@deskthing/ty
 import { DECK_MSG, DEFAULT_CONFIG_PORT, RESERVED_PORTS, type ClientToServer } from "../shared/types";
 import { openUrl } from "./actions";
 import { configuratorUrl, startConfigServer, stopConfigServer } from "./configServer";
-import { changePage, goToPage, loadProfile, press, sendView } from "./deck";
+import { changePage, goToPage, initDeck, press, sendView, stopDeck } from "./deck";
+import { obs } from "./obs";
+import { getSettings, loadStore } from "./store";
 import { inputHelper } from "./win/input";
 
 const PORT_SETTING = "configuratorPort";
@@ -23,8 +25,10 @@ async function applyPort(port: unknown) {
 }
 
 const start = async () => {
-  await loadProfile();
+  await loadStore();
+  initDeck();
   inputHelper.warmUp();
+  obs.configure(getSettings().obs);
 
   const settings: AppSettings = {
     [PORT_SETTING]: {
@@ -48,6 +52,8 @@ const start = async () => {
 
 const stop = async () => {
   stopConfigServer();
+  obs.stop();
+  stopDeck();
   inputHelper.stop();
   console.log("StreamDeck server stopped");
 };

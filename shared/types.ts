@@ -9,6 +9,19 @@ export type MediaKey =
   | "volumedown"
   | "mute";
 
+export type ObsAction =
+  /** Switch the program scene. Live state: the scene is currently live. */
+  | { type: "obs"; op: "scene"; scene: string }
+  /** Toggle recording / streaming / virtual camera. Live state: output active. */
+  | { type: "obs"; op: "record" | "stream" | "virtualcam" }
+  /** Toggle mute on an audio input (e.g. "Mic/Aux"). Live state: muted. */
+  | { type: "obs"; op: "mute"; input: string };
+
+export type ObsOp = ObsAction["op"];
+
+export type AudioDevice = "mic" | "speakers";
+export type AudioOp = "toggle" | "mute" | "unmute";
+
 export type ActionConfig =
   /** Key combo, e.g. ["CTRL", "SHIFT", "ESC"]. Keys are pressed in order and released in reverse. */
   | { type: "hotkey"; keys: string[] }
@@ -23,12 +36,28 @@ export type ActionConfig =
   | { type: "text"; text: string }
   /** Navigate between pages of the current profile. */
   | { type: "page"; target: "next" | "previous" | number }
+  /** Open a folder (a hidden sub-page). */
+  | { type: "folder"; folderId: string }
+  /** Leave the current folder. */
+  | { type: "back" }
+  | ObsAction
+  /** Mute / unmute the default microphone or speakers. Live state: muted. */
+  | { type: "audio"; device: AudioDevice; op: AudioOp }
+  /** Run several steps in order. */
+  | { type: "multi"; steps: StepConfig[] }
   | { type: "none" };
 
-export type ActionType = ActionConfig["type"];
+/** One step of a multi-action: any non-multi action, or a pause. */
+export type StepConfig = Exclude<ActionConfig, { type: "multi" }> | { type: "delay"; ms: number };
 
-export interface ButtonConfig {
-  id: string;
+export type ActionType = ActionConfig["type"];
+export type StepType = StepConfig["type"];
+
+/** Action types whose on/off state is read from the real world (OBS, Windows audio). */
+export const LIVE_STATE_TYPES: readonly ActionType[] = ["obs", "audio"];
+export const hasLiveState = (a: ActionConfig) => LIVE_STATE_TYPES.includes(a.type);
+
+export interface Appearance {
   label?: string;
   /** Emoji or short text shown large in the button. */
   icon?: string;
@@ -38,7 +67,25 @@ export interface ButtonConfig {
   color?: string;
   /** Label / icon color (CSS). */
   textColor?: string;
+}
+
+export interface OnState extends Appearance {
+  /**
+   * Manual toggles only (actions without live state): what to run when pressed
+   * while "on". Omitted = run the main action again.
+   */
+  action?: ActionConfig;
+}
+
+export interface ButtonConfig extends Appearance {
+  id: string;
   action: ActionConfig;
+  /**
+   * Optional second state. Fields here override the normal look while the
+   * button is "on". For OBS / audio actions "on" follows the live state;
+   * for anything else the button becomes a manual toggle.
+   */
+  onState?: OnState;
 }
 
 export interface PageConfig {
@@ -54,16 +101,15 @@ export interface ProfileConfig {
   cols: number;
   rows: number;
   pages: PageConfig[];
+  /** Hidden pages opened by "folder" actions. */
+  folders?: PageConfig[];
 }
 
 /** What the client needs to draw one button (no action details leave the server). */
-export interface ButtonView {
+export interface ButtonView extends Appearance {
   id: string;
-  label?: string;
-  icon?: string;
-  image?: string;
-  color?: string;
-  textColor?: string;
+  /** Show a small "active" dot (button is on but has no custom on-look). */
+  indicator?: boolean;
 }
 
 export interface DeckView {
@@ -73,6 +119,8 @@ export interface DeckView {
   pageIndex: number;
   pageCount: number;
   pageName: string;
+  /** Set when a folder is open (pageName is then the folder name). */
+  inFolder?: boolean;
   buttons: (ButtonView | null)[];
 }
 
@@ -92,6 +140,41 @@ export type ServerToClient =
   | { type: "view"; payload: DeckView }
   | { type: "pressResult"; payload: { buttonId: string; ok: boolean; error?: string } };
 
+// ---- App settings (edited in the configurator) ----------------------------
+
+export interface ObsSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  password: string;
+}
+
+export interface AppSettingsData {
+  obs: ObsSettings;
+}
+
+/** What the configurator sees: the password is never sent back. */
+export interface PublicSettings {
+  obs: Omit<ObsSettings, "password"> & { hasPassword: boolean };
+}
+
+/** Settings update from the configurator; password omitted = keep the current one. */
+export interface SettingsUpdate {
+  obs: Omit<ObsSettings, "password"> & { password?: string };
+}
+
+export const DEFAULT_SETTINGS: AppSettingsData = {
+  obs: { enabled: false, host: "127.0.0.1", port: 4455, password: "" },
+};
+
+export interface ObsStatus {
+  enabled: boolean;
+  connected: boolean;
+  error?: string;
+  scenes: string[];
+  inputs: string[];
+}
+
 // ---- Limits (enforced by the server, mirrored in the configurator) --------
 
 export const LIMITS = {
@@ -100,8 +183,11 @@ export const LIMITS = {
   minRows: 1,
   maxRows: 5,
   maxPages: 50,
+  maxFolders: 50,
   maxLabel: 40,
   maxIcon: 16,
+  maxSteps: 20,
+  maxDelayMs: 60_000,
   /** Max size of one image data URL, in characters. */
   maxImage: 300_000,
 } as const;

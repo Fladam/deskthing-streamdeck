@@ -11,8 +11,10 @@ import http from "node:http";
 import net from "node:net";
 import { RESERVED_PORTS } from "../shared/types";
 import configuratorHtml from "./generated/configuratorHtml";
-import { ValidationError, validateAction, validateProfile } from "../shared/validate";
-import { getProfile, saveProfile, testAction } from "./deck";
+import { ValidationError, validateAction, validateProfile, validateSettingsUpdate } from "../shared/validate";
+import { saveProfile, testAction } from "./deck";
+import { obs } from "./obs";
+import { getProfile, getSettings, publicSettings, updateSettings } from "./store";
 
 const MAX_BODY = 20 * 1024 * 1024;
 const CSRF_HEADER = "x-streamdeck-config";
@@ -103,6 +105,21 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, port:
       sendJson(res, 200, profile);
       return;
     }
+
+    case "GET /api/settings":
+      sendJson(res, 200, publicSettings());
+      return;
+
+    case "PUT /api/settings": {
+      updateSettings(validateSettingsUpdate(await readJson(req)));
+      obs.configure(getSettings().obs);
+      sendJson(res, 200, publicSettings());
+      return;
+    }
+
+    case "GET /api/obs/status":
+      sendJson(res, 200, obs.status());
+      return;
 
     case "POST /api/test": {
       const body = (await readJson(req)) as { action?: unknown };

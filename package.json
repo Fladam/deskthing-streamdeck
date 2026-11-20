@@ -1,7 +1,7 @@
 {
   "name": "deskthing-streamdeck",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.3.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -19,7 +19,8 @@
     "@deskthing/server": "^0.11.6",
     "autoprefixer": "^10.4.21",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "@deskthing/cli": "^0.11.15",

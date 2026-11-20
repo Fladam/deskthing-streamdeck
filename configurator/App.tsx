@@ -1,22 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LIMITS, type ButtonConfig, type ProfileConfig } from "../shared/types";
+import { LIMITS, type ButtonConfig, type ObsStatus, type PageConfig, type ProfileConfig } from "../shared/types";
 import { api } from "./api";
 import { GridEditor } from "./components/GridEditor";
 import { Inspector } from "./components/Inspector";
-import { blankButton, blankPage, cloneButton, resizeGrid } from "./model";
+import { ObsBadge, SettingsDialog } from "./components/SettingsDialog";
+import { blankButton, blankFolder, blankPage, cloneButton, removeFolderRefs, resizeGrid, type EditorContext } from "./model";
 
 type SaveState = { state: "idle" | "saving" | "saved" | "error"; msg?: string };
+type Kind = "page" | "folder";
+interface ViewRef {
+  kind: Kind;
+  index: number;
+}
 
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+const keyOf = (v: ViewRef) => `${v.kind}:${v.index}`;
+const parseKey = (k: string): ViewRef => {
+  const [kind, i] = k.split(":");
+  return { kind: kind as Kind, index: Number(i) };
+};
+const listOf = (p: ProfileConfig, kind: Kind) => (kind === "page" ? p.pages : p.folders ?? []);
+const withList = (p: ProfileConfig, kind: Kind, list: PageConfig[]): ProfileConfig =>
+  kind === "page" ? { ...p, pages: list } : { ...p, folders: list };
 
 export default function App() {
   const [profile, setProfile] = useState<ProfileConfig | null>(null);
   const [savedJson, setSavedJson] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [view, setView] = useState<ViewRef>({ kind: "page", index: 0 });
   const [selected, setSelected] = useState<number | null>(null);
   const [save, setSave] = useState<SaveState>({ state: "idle" });
-  const [renaming, setRenaming] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [obsStatus, setObsStatus] = useState<ObsStatus | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -30,9 +46,16 @@ export default function App() {
     }
   }, []);
 
+  const refreshObs = useCallback(() => {
+    api.obsStatus().then(setObsStatus, () => setObsStatus(null));
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    refreshObs();
+    const t = setInterval(refreshObs, 3000);
+    return () => clearInterval(t);
+  }, [load, refreshObs]);
 
   const dirty = useMemo(() => !!profile && JSON.stringify(profile) !== savedJson, [profile, savedJson]);
 
@@ -69,6 +92,11 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [doSave]);
 
+  const ctx: EditorContext = useMemo(
+    () => ({ pages: profile?.pages ?? [], folders: profile?.folders ?? [], obs: obsStatus }),
+    [profile?.pages, profile?.folders, obsStatus]
+  );
+
   if (loadError) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-neutral-300">
@@ -79,23 +107,32 @@ export default function App() {
   }
   if (!profile) return <div className="min-h-screen flex items-center justify-center text-neutral-500">Loading…</div>;
 
-  const page = profile.pages[Math.min(pageIndex, profile.pages.length - 1)];
+  const folders = profile.folders ?? [];
+  const current: ViewRef =
+    view.kind === "folder" && view.index < folders.length
+      ? view
+      : { kind: "page", index: Math.min(view.kind === "page" ? view.index : 0, profile.pages.length - 1) };
+  const page = listOf(profile, current.kind)[current.index];
   const slots = profile.cols * profile.rows;
   const selectedButton = selected !== null ? page.buttons[selected] ?? null : null;
 
-  // ---- mutations ----------------------------------------------------------
-  const updatePage = (idx: number, fn: (buttons: (ButtonConfig | null)[]) => (ButtonConfig | null)[]) =>
-    setProfile((p) =>
-      p && {
-        ...p,
-        pages: p.pages.map((pg, i) =>
-          i === idx ? { ...pg, buttons: fn(Array.from({ length: slots }, (_, s) => pg.buttons[s] ?? null)) } : pg
-        ),
-      }
-    );
+  const goTo = (v: ViewRef) => {
+    setView(v);
+    setSelected(null);
+  };
 
-  const setSlot = (slot: number, b: ButtonConfig | null) =>
-    updatePage(pageIndex, (btns) => btns.map((x, i) => (i === slot ? b : x)));
+  // ---- mutations ----------------------------------------------------------
+  const updateView = (target: ViewRef, fn: (buttons: (ButtonConfig | null)[]) => (ButtonConfig | null)[]) =>
+    setProfile((p) => {
+      if (!p) return p;
+      const list = listOf(p, target.kind).map((pg, i) =>
+        i === target.index ? { ...pg, buttons: fn(Array.from({ length: slots }, (_, s) => pg.buttons[s] ?? null)) } : pg
+      );
+      return withList(p, target.kind, list);
+    });
+
+  const setSlot = (slot: number, b: ButtonConfig | null, target: ViewRef = current) =>
+    updateView(target, (btns) => btns.map((x, i) => (i === slot ? b : x)));
 
   const addButton = (slot: number) => {
     setSlot(slot, blankButton());
@@ -103,7 +140,7 @@ export default function App() {
   };
 
   const moveButton = (from: number, to: number) => {
-    updatePage(pageIndex, (btns) => {
+    updateView(current, (btns) => {
       const next = [...btns];
       [next[from], next[to]] = [next[to], next[from]];
       return next;
@@ -111,20 +148,22 @@ export default function App() {
     setSelected(to);
   };
 
+  const firstFree = (pg: PageConfig) => range(0, slots - 1).find((i) => !pg.buttons[i]);
+
   const duplicate = (slot: number) => {
-    const free = page.buttons.findIndex((b, i) => i < slots && !b);
-    const freeSlot = free >= 0 ? free : page.buttons.length < slots ? page.buttons.length : -1;
-    if (freeSlot < 0) return alert("No empty slot on this page.");
-    setSlot(freeSlot, cloneButton(page.buttons[slot]!));
-    setSelected(freeSlot);
+    const free = firstFree(page);
+    if (free === undefined) return alert("No empty slot here.");
+    setSlot(free, cloneButton(page.buttons[slot]!));
+    setSelected(free);
   };
 
-  const moveToPage = (slot: number, target: number) => {
-    const targetPage = profile.pages[target];
-    const free = Array.from({ length: slots }, (_, i) => i).find((i) => !targetPage.buttons[i]);
+  const moveToView = (slot: number, targetKey: string) => {
+    const target = parseKey(targetKey);
+    const targetPage = listOf(profile, target.kind)[target.index];
+    const free = firstFree(targetPage);
     if (free === undefined) return alert(`“${targetPage.name}” is full.`);
     const b = page.buttons[slot]!;
-    updatePage(target, (btns) => btns.map((x, i) => (i === free ? b : x)));
+    setSlot(free, b, target);
     setSlot(slot, null);
     setSelected(null);
   };
@@ -136,33 +175,40 @@ export default function App() {
     setSelected(null);
   };
 
-  const addPage = () => {
-    if (profile.pages.length >= LIMITS.maxPages) return;
-    setProfile({ ...profile, pages: [...profile.pages, blankPage(slots, profile.pages.length + 1)] });
-    setPageIndex(profile.pages.length);
-    setSelected(null);
+  const addView = (kind: Kind) => {
+    const list = listOf(profile, kind);
+    const max = kind === "page" ? LIMITS.maxPages : LIMITS.maxFolders;
+    if (list.length >= max) return;
+    const created = kind === "page" ? blankPage(slots, list.length + 1) : blankFolder(slots, list.length + 1);
+    setProfile(withList(profile, kind, [...list, created]));
+    goTo({ kind, index: list.length });
   };
 
-  const deletePage = (idx: number) => {
-    if (profile.pages.length <= 1) return;
-    const count = profile.pages[idx].buttons.filter(Boolean).length;
-    if (count && !confirm(`Delete “${profile.pages[idx].name}” and its ${count} button(s)?`)) return;
-    setProfile({ ...profile, pages: profile.pages.filter((_, i) => i !== idx) });
-    setPageIndex((p) => Math.max(0, p >= idx ? p - 1 : p));
-    setSelected(null);
+  const deleteView = (v: ViewRef) => {
+    const list = listOf(profile, v.kind);
+    if (v.kind === "page" && list.length <= 1) return;
+    const target = list[v.index];
+    const count = target.buttons.filter(Boolean).length;
+    const what = v.kind === "page" ? "page" : "folder";
+    const note = v.kind === "folder" ? " Buttons that open it will be set to “None”." : "";
+    if (!confirm(`Delete ${what} “${target.name}”${count ? ` and its ${count} button(s)` : ""}?${note}`)) return;
+    let next = withList(profile, v.kind, list.filter((_, i) => i !== v.index));
+    if (v.kind === "folder") next = removeFolderRefs(next, target.id);
+    setProfile(next);
+    goTo(v.kind === "page" || list.length > 1 ? { kind: v.kind, index: Math.max(0, v.index - 1) } : { kind: "page", index: 0 });
   };
 
-  const movePage = (idx: number, dir: -1 | 1) => {
-    const to = idx + dir;
-    if (to < 0 || to >= profile.pages.length) return;
-    const pages = [...profile.pages];
-    [pages[idx], pages[to]] = [pages[to], pages[idx]];
-    setProfile({ ...profile, pages });
-    setPageIndex(to);
+  const moveView = (v: ViewRef, dir: -1 | 1) => {
+    const list = [...listOf(profile, v.kind)];
+    const to = v.index + dir;
+    if (to < 0 || to >= list.length) return;
+    [list[v.index], list[to]] = [list[to], list[v.index]];
+    setProfile(withList(profile, v.kind, list));
+    setView({ kind: v.kind, index: to });
   };
 
-  const renamePage = (idx: number, name: string) =>
-    setProfile({ ...profile, pages: profile.pages.map((p, i) => (i === idx ? { ...p, name } : p)) });
+  const renameView = (v: ViewRef, name: string) =>
+    setProfile(withList(profile, v.kind, listOf(profile, v.kind).map((p, i) => (i === v.index ? { ...p, name } : p))));
 
   const exportProfile = () => {
     const blob = new Blob([JSON.stringify(profile, null, 2)], { type: "application/json" });
@@ -178,15 +224,56 @@ export default function App() {
       const data = JSON.parse(await file.text()) as ProfileConfig;
       if (!Array.isArray(data?.pages) || !data.cols || !data.rows) throw new Error("Not a StreamDeck profile file");
       setProfile(data);
-      setPageIndex(0);
-      setSelected(null);
+      goTo({ kind: "page", index: 0 });
       setSave({ state: "idle" });
     } catch (e) {
       alert(`Import failed: ${e instanceof Error ? e.message : e}`);
     }
   };
 
+  const moveTargets = [
+    ...profile.pages.map((p, i) => ({ key: `page:${i}`, label: `${i + 1}. ${p.name}` })),
+    ...folders.map((f, i) => ({ key: `folder:${i}`, label: `📁 ${f.name}` })),
+  ];
+
   // ---- render ---------------------------------------------------------------
+  const tab = (v: ViewRef, label: string, name: string) => {
+    const k = keyOf(v);
+    const active = keyOf(current) === k;
+    if (renaming === k) {
+      return (
+        <input
+          key={k}
+          autoFocus
+          className="field w-36"
+          defaultValue={name}
+          maxLength={LIMITS.maxLabel}
+          onBlur={(e) => {
+            renameView(v, e.target.value.trim() || name);
+            setRenaming(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            if (e.key === "Escape") setRenaming(null);
+          }}
+        />
+      );
+    }
+    return (
+      <button
+        key={k}
+        className={`px-3 py-1.5 rounded-md text-sm ${active ? "bg-neutral-100 text-neutral-900 font-medium" : "bg-neutral-800 hover:bg-neutral-700"}`}
+        onClick={() => goTo(v)}
+        onDoubleClick={() => setRenaming(k)}
+        title="Double-click to rename"
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const currentList = listOf(profile, current.kind);
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="flex flex-wrap items-center gap-3 px-5 py-3 border-b border-neutral-800 bg-neutral-900/60">
@@ -208,8 +295,10 @@ export default function App() {
             {range(LIMITS.minRows, LIMITS.maxRows).map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
+        <ObsBadge status={obsStatus} />
 
         <div className="ml-auto flex items-center gap-2">
+          <button className="btn" onClick={() => setShowSettings(true)}>⚙ Settings</button>
           <button className="btn" onClick={() => importRef.current?.click()}>Import</button>
           <button className="btn" onClick={exportProfile}>Export</button>
           <input
@@ -242,61 +331,45 @@ export default function App() {
       </header>
 
       {save.state === "error" && (
-        <div className="px-5 py-2 bg-red-950 text-red-200 text-sm border-b border-red-900">
-          Save failed: {save.msg}
-        </div>
+        <div className="px-5 py-2 bg-red-950 text-red-200 text-sm border-b border-red-900">Save failed: {save.msg}</div>
       )}
 
       <div className="flex-1 flex flex-col lg:flex-row min-h-0">
         <main className="flex-1 p-5 space-y-4 min-w-0">
-          <nav className="flex flex-wrap items-center gap-1.5">
-            {profile.pages.map((p, i) =>
-              renaming === i ? (
-                <input
-                  key={p.id}
-                  autoFocus
-                  className="field w-36"
-                  defaultValue={p.name}
-                  maxLength={LIMITS.maxLabel}
-                  onBlur={(e) => {
-                    renamePage(i, e.target.value.trim() || p.name);
-                    setRenaming(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                    if (e.key === "Escape") setRenaming(null);
-                  }}
-                />
-              ) : (
-                <button
-                  key={p.id}
-                  className={`px-3 py-1.5 rounded-md text-sm ${
-                    i === pageIndex ? "bg-neutral-100 text-neutral-900 font-medium" : "bg-neutral-800 hover:bg-neutral-700"
-                  }`}
-                  onClick={() => {
-                    setPageIndex(i);
-                    setSelected(null);
-                  }}
-                  onDoubleClick={() => setRenaming(i)}
-                  title="Double-click to rename"
-                >
-                  {i + 1}. {p.name}
-                </button>
-              )
-            )}
-            <button className="btn" onClick={addPage} title="Add page">+ Page</button>
-            <span className="ml-auto flex gap-1.5">
-              <button className="btn" onClick={() => movePage(pageIndex, -1)} disabled={pageIndex === 0} title="Move page left">←</button>
-              <button className="btn" onClick={() => movePage(pageIndex, 1)} disabled={pageIndex === profile.pages.length - 1} title="Move page right">→</button>
-              <button className="btn" onClick={() => setRenaming(pageIndex)}>Rename</button>
-              <button className="btn btn-danger" onClick={() => deletePage(pageIndex)} disabled={profile.pages.length <= 1}>Delete page</button>
-            </span>
+          <nav className="space-y-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="w-16 text-xs uppercase tracking-wide text-neutral-500">Pages</span>
+              {profile.pages.map((p, i) => tab({ kind: "page", index: i }, `${i + 1}. ${p.name}`, p.name))}
+              <button className="btn" onClick={() => addView("page")}>+ Page</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="w-16 text-xs uppercase tracking-wide text-neutral-500">Folders</span>
+              {folders.map((f, i) => tab({ kind: "folder", index: i }, `📁 ${f.name}`, f.name))}
+              <button className="btn" onClick={() => addView("folder")} title="Folders are hidden pages opened by a button">+ Folder</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-sm text-neutral-400 mr-auto">
+                Editing {current.kind === "folder" ? "folder" : "page"} <b className="text-neutral-200">{page.name}</b>
+                {current.kind === "folder" && <span className="text-neutral-500"> · open it with a button set to “Open folder”</span>}
+              </span>
+              <button className="btn" onClick={() => moveView(current, -1)} disabled={current.index === 0} title="Move left">←</button>
+              <button className="btn" onClick={() => moveView(current, 1)} disabled={current.index === currentList.length - 1} title="Move right">→</button>
+              <button className="btn" onClick={() => setRenaming(keyOf(current))}>Rename</button>
+              <button
+                className="btn btn-danger"
+                onClick={() => deleteView(current)}
+                disabled={current.kind === "page" && profile.pages.length <= 1}
+              >
+                Delete {current.kind}
+              </button>
+            </div>
           </nav>
 
           <GridEditor
             page={page}
-            pageIndex={pageIndex}
+            pageIndex={current.kind === "page" ? current.index : 0}
             pageCount={profile.pages.length}
+            inFolder={current.kind === "folder"}
             cols={profile.cols}
             rows={profile.rows}
             selected={selected}
@@ -309,20 +382,21 @@ export default function App() {
           </p>
         </main>
 
-        <aside className="lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-neutral-800 p-5 overflow-y-auto">
+        <aside className="lg:w-[26rem] shrink-0 border-t lg:border-t-0 lg:border-l border-neutral-800 p-5 overflow-y-auto">
           {selectedButton && selected !== null ? (
             <Inspector
               key={selectedButton.id}
               button={selectedButton}
-              pages={profile.pages}
-              pageIndex={pageIndex}
+              ctx={ctx}
+              location={keyOf(current)}
+              moveTargets={moveTargets}
               onChange={(b) => setSlot(selected, b)}
               onDelete={() => {
                 setSlot(selected, null);
                 setSelected(null);
               }}
               onDuplicate={() => duplicate(selected)}
-              onMoveToPage={(t) => moveToPage(selected, t)}
+              onMove={(k) => moveToView(selected, k)}
             />
           ) : (
             <div className="text-sm text-neutral-500 space-y-2">
@@ -332,6 +406,10 @@ export default function App() {
           )}
         </aside>
       </div>
+
+      {showSettings && (
+        <SettingsDialog obsStatus={obsStatus} onClose={() => setShowSettings(false)} onSaved={() => setTimeout(refreshObs, 800)} />
+      )}
     </div>
   );
 }

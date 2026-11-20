@@ -1,6 +1,22 @@
-import type { ActionConfig, ActionType, ButtonConfig, PageConfig, ProfileConfig } from "../shared/types";
+import type {
+  ActionConfig,
+  ActionType,
+  ButtonConfig,
+  ObsStatus,
+  PageConfig,
+  ProfileConfig,
+  StepConfig,
+  StepType,
+} from "../shared/types";
 
 export const newId = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+
+/** Everything an action editor needs to offer choices. */
+export interface EditorContext {
+  pages: PageConfig[];
+  folders: PageConfig[];
+  obs: ObsStatus | null;
+}
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   none: "None",
@@ -10,10 +26,20 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   url: "Open URL",
   command: "Run command",
   text: "Type text",
+  multi: "Multi-action (several steps)",
   page: "Go to page",
+  folder: "Open folder",
+  back: "Back (leave folder)",
+  obs: "OBS",
+  audio: "Mute mic / speakers",
 };
 
-export function defaultAction(type: ActionType): ActionConfig {
+export const STEP_LABELS: Record<StepType, string> = (() => {
+  const { multi: _multi, ...rest } = ACTION_LABELS;
+  return { ...rest, delay: "Wait" } as Record<StepType, string>;
+})();
+
+export function defaultAction(type: ActionType, ctx?: EditorContext): ActionConfig {
   switch (type) {
     case "hotkey": return { type, keys: [] };
     case "media": return { type, key: "playpause" };
@@ -22,8 +48,17 @@ export function defaultAction(type: ActionType): ActionConfig {
     case "command": return { type, command: "", shell: "powershell" };
     case "text": return { type, text: "" };
     case "page": return { type, target: "next" };
+    case "folder": return { type, folderId: ctx?.folders[0]?.id ?? "" };
+    case "back": return { type };
+    case "obs": return { type, op: "record" };
+    case "audio": return { type, device: "mic", op: "toggle" };
+    case "multi": return { type, steps: [{ type: "none" }] };
     default: return { type: "none" };
   }
+}
+
+export function defaultStep(type: StepType, ctx?: EditorContext): StepConfig {
+  return type === "delay" ? { type, ms: 500 } : (defaultAction(type, ctx) as StepConfig);
 }
 
 export const blankButton = (): ButtonConfig => ({
@@ -35,6 +70,16 @@ export const blankButton = (): ButtonConfig => ({
   action: { type: "none" },
 });
 
+export const backButton = (): ButtonConfig => ({
+  id: newId("b"),
+  label: "Back",
+  icon: "⬅",
+  color: "#312e81",
+  textColor: "#ffffff",
+  action: { type: "back" },
+});
+
+/** Deep-copy a button with fresh ids. */
 export const cloneButton = (b: ButtonConfig): ButtonConfig => ({ ...structuredClone(b), id: newId("b") });
 
 export const blankPage = (slots: number, n: number): PageConfig => ({
@@ -43,10 +88,17 @@ export const blankPage = (slots: number, n: number): PageConfig => ({
   buttons: Array(slots).fill(null),
 });
 
+/** New folders start with a Back button in the first slot. */
+export const blankFolder = (slots: number, n: number): PageConfig => ({
+  id: newId("f"),
+  name: `Folder ${n}`,
+  buttons: [backButton(), ...Array(slots - 1).fill(null)],
+});
+
 /** Re-grid a profile, keeping each button at the same row/column. Reports how many buttons don't fit. */
 export function resizeGrid(profile: ProfileConfig, cols: number, rows: number) {
   let lost = 0;
-  const pages = profile.pages.map((page) => {
+  const regrid = (page: PageConfig): PageConfig => {
     const buttons: (ButtonConfig | null)[] = Array(cols * rows).fill(null);
     page.buttons.forEach((b, i) => {
       if (!b) return;
@@ -56,12 +108,34 @@ export function resizeGrid(profile: ProfileConfig, cols: number, rows: number) {
       else lost++;
     });
     return { ...page, buttons };
-  });
-  return { profile: { ...profile, cols, rows, pages }, lost };
+  };
+  return {
+    profile: { ...profile, cols, rows, pages: profile.pages.map(regrid), folders: profile.folders?.map(regrid) },
+    lost,
+  };
 }
 
-/** Describe an action in a few words, for tooltips and the slot list. */
-export function describeAction(a: ActionConfig): string {
+/** Replace every action that opens `folderId` with "none" (used when a folder is deleted). */
+export function removeFolderRefs(profile: ProfileConfig, folderId: string): ProfileConfig {
+  const fix = <T extends ActionConfig | StepConfig>(a: T): T => {
+    if (a.type === "folder" && a.folderId === folderId) return { type: "none" } as T;
+    if (a.type === "multi") return { ...a, steps: a.steps.map(fix) } as T;
+    return a;
+  };
+  const fixButton = (b: ButtonConfig | null) =>
+    b && {
+      ...b,
+      action: fix(b.action),
+      onState: b.onState && { ...b.onState, action: b.onState.action && fix(b.onState.action) },
+    };
+  const fixPage = (p: PageConfig) => ({ ...p, buttons: p.buttons.map(fixButton) });
+  return { ...profile, pages: profile.pages.map(fixPage), folders: profile.folders?.map(fixPage) };
+}
+
+const OBS_OP_LABELS = { record: "Toggle recording", stream: "Toggle streaming", virtualcam: "Toggle virtual camera" };
+
+/** Describe an action in a few words, for tooltips. */
+export function describeAction(a: ActionConfig | StepConfig, ctx?: EditorContext): string {
   switch (a.type) {
     case "hotkey": return a.keys.join(" + ") || "Hotkey (empty)";
     case "media": return `Media: ${a.key}`;
@@ -70,6 +144,15 @@ export function describeAction(a: ActionConfig): string {
     case "command": return a.command || "Command (empty)";
     case "text": return `Type "${a.text}"`;
     case "page": return typeof a.target === "number" ? `Page ${a.target + 1}` : `${a.target} page`;
+    case "folder": return `Open folder ${ctx?.folders.find((f) => f.id === a.folderId)?.name ?? ""}`.trim();
+    case "back": return "Back";
+    case "obs":
+      if (a.op === "scene") return `OBS scene: ${a.scene}`;
+      if (a.op === "mute") return `OBS mute: ${a.input}`;
+      return `OBS: ${OBS_OP_LABELS[a.op]}`;
+    case "audio": return `${a.op} ${a.device}`;
+    case "multi": return `${a.steps.length} steps: ${a.steps.map((s) => describeAction(s, ctx)).join(" → ")}`;
+    case "delay": return `Wait ${a.ms} ms`;
     default: return "No action";
   }
 }

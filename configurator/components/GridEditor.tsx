@@ -8,13 +8,14 @@ export const GridEditor: React.FC<{
   page: PageConfig;
   pageIndex: number;
   pageCount: number;
+  inFolder?: boolean;
   cols: number;
   rows: number;
   selected: number | null;
   onSelect: (slot: number) => void;
   onAdd: (slot: number) => void;
   onMove: (from: number, to: number) => void;
-}> = ({ page, pageIndex, pageCount, cols, rows, selected, onSelect, onAdd, onMove }) => {
+}> = ({ page, pageIndex, pageCount, inFolder, cols, rows, selected, onSelect, onAdd, onMove }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -34,11 +35,11 @@ export const GridEditor: React.FC<{
     <div ref={wrapRef} className="w-full">
       <div style={{ width: DEVICE_WIDTH * scale, height: DEVICE_HEIGHT * scale }} className="mx-auto">
         <div
-          className="bg-black rounded-xl shadow-2xl ring-1 ring-neutral-800 flex flex-col p-3 gap-2 origin-top-left"
+          className="bg-black rounded-xl shadow-2xl ring-1 ring-neutral-800 flex flex-col p-3 origin-top-left"
           style={{ width: DEVICE_WIDTH, height: DEVICE_HEIGHT, transform: `scale(${scale})` }}
         >
           <div
-            className="flex-1 grid gap-3 min-h-0"
+            className="flex-1 grid gap-3 min-h-0 mb-2"
             style={{
               gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
               gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
@@ -91,7 +92,7 @@ export const GridEditor: React.FC<{
             })}
           </div>
           <div className="h-6 flex items-center justify-center text-neutral-400 text-base">
-            <PageIndicator name={page.name} index={pageIndex} count={pageCount} />
+            <PageIndicator name={page.name} index={pageIndex} count={pageCount} inFolder={inFolder} />
           </div>
         </div>
       </div>

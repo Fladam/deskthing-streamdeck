@@ -1,5 +1,5 @@
-// Action engine: one executor per action type.
-// "page" actions are handled by the deck itself (they change navigation state), see deck.ts.
+// Executors for "basic" actions that just do something on the PC.
+// Navigation, multi-actions, OBS and audio are handled in deck.ts.
 
 import { spawn } from "child_process";
 import type { ActionConfig, ActionType } from "../shared/types";
@@ -12,6 +12,9 @@ const LOCK_SIGNATURES = new Set([comboSignature(["WIN", "L"]), comboSignature(["
 const SAS_SIGNATURES = new Set(["CTRL", "LCTRL", "RCTRL"].flatMap((c) =>
   ["ALT", "LALT", "RALT"].map((a) => comboSignature([c, a, "DELETE"]))
 ));
+
+export type BasicActionType = Extract<ActionType, "hotkey" | "launch" | "url" | "command" | "media" | "text" | "none">;
+export type BasicAction = Extract<ActionConfig, { type: BasicActionType }>;
 
 type Executor<T extends ActionType> = (action: Extract<ActionConfig, { type: T }>) => Promise<void>;
 
@@ -33,7 +36,7 @@ export async function openUrl(url: string): Promise<void> {
   await detached("rundll32.exe", ["url.dll,FileProtocolHandler", url]);
 }
 
-const executors:{ [K in Exclude<ActionType, "page">]: Executor<K> } = {
+const executors: { [K in BasicActionType]: Executor<K> } = {
   none: async () => {},
 
   hotkey: async ({ keys }) => {
@@ -69,9 +72,8 @@ const executors:{ [K in Exclude<ActionType, "page">]: Executor<K> } = {
   },
 };
 
-export async function runAction(action: ActionConfig): Promise<void> {
-  if (action.type === "page") throw new Error("Page actions are handled by the deck");
-  const exec = executors[action.type] as Executor<typeof action.type>;
+export async function runAction(action: BasicAction): Promise<void> {
+  const exec = executors[action.type] as Executor<BasicActionType> | undefined;
   if (!exec) throw new Error(`Unknown action type "${(action as ActionConfig).type}"`);
   await exec(action as never);
 }

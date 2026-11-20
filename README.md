@@ -40,9 +40,12 @@ The port can be changed in the app's DeskThing settings. The configurator only l
 ## Layout
 
 - `shared/types.ts`: profile/button/action types and client↔server messages
-- `server/deck.ts`: profile storage (DeskThing `saveData`), page state, press handling
-- `server/actions.ts`: action executors
-- `server/win/input.ts`: persistent PowerShell helper that calls Win32 `SendInput` (no native Node modules, because the CLI bundles the server into one file)
+- `server/deck.ts`: navigation (pages + folder stack), on/off state, multi-actions, press handling
+- `server/actions.ts`: executors for basic PC actions (keys, launch, URL, command, text)
+- `server/obs.ts`: obs-websocket v5 client with live state + auto-reconnect
+- `server/audioState.ts`: default mic/speaker mute state (Core Audio via the helper), polled while displayed
+- `server/store.ts`: profile + settings persistence
+- `server/win/input.ts`: persistent PowerShell helper (Win32 `SendInput`, `LockWorkStation`, Core Audio mute). No native Node modules, because the CLI bundles the server into one file
 - `server/defaultProfile.ts`: default 4×2 layout used until a profile is saved
 - `shared/validate.ts`: strict profile validation (server-side, on every save)
 - `server/configServer.ts`: localhost HTTP server for the configurator + API
@@ -60,6 +63,27 @@ The port can be changed in the app's DeskThing settings. The configurator only l
 | `command` | `command`, `shell?` (`powershell`/`cmd`) | `Stop-Process -Name foo` |
 | `text` | `text` | types the text into the focused window |
 | `page` | `target` | `next`, `previous`, or a page index |
+| `folder` | `folderId` | opens a folder (hidden page); new folders get a Back button |
+| `back` | | leaves the current folder |
+| `obs` | `op` (+ `scene` / `input`) | `scene`, `record`, `stream`, `virtualcam`, `mute` (live state) |
+| `audio` | `device`, `op` | `mic` / `speakers` × `toggle` / `mute` / `unmute` (live state) |
+| `multi` | `steps` | up to 20 steps of any action above, plus `{ "type": "delay", "ms": 500 }` |
+
+### Two-state buttons
+
+A button can have an `onState` (label / icon / image / colors) shown while it's "on":
+
+- **OBS and audio buttons** follow the real state: recording/streaming/virtual cam active, scene live, input or device muted. That includes changes made outside the deck.
+- **Any other button** becomes a manual toggle that flips on each press. `onState.action` can run a different action while on.
+- An "on" button with no custom look shows a red dot.
+
+### OBS
+
+In OBS 28+: **Tools → WebSocket Server Settings → Enable WebSocket server**. Then in the configurator open **⚙ Settings**, tick *Connect to OBS*, and enter the port/password from OBS's "Show Connect Info". The status badge in the header shows whether it's connected. The deck reconnects automatically when OBS starts.
+
+### Folders and navigation
+
+Folders are pages that aren't in the dial rotation. A button with **Open folder** shows one, and **Back** returns. Turning the dial or pressing a top button inside a folder leaves it.
 
 ## Roadmap
 
@@ -67,5 +91,5 @@ The port can be changed in the app's DeskThing settings. The configurator only l
 - [x] **1. MVP:** 4×2 grid, hotkey / launch / URL / command / media / text actions, press feedback
 - [x] **2. Pages:** multiple pages, dial and top-button navigation (folders still to do)
 - [x] **3. Configurator:** localhost web UI to edit profiles (drag-and-drop, image/emoji icons, action forms, test button), live push to device, grid size, import/export
-- [ ] **4. Rich actions:** multi-action sequences, toggle buttons with state, OBS (obs-websocket), mic/volume state, folders
+- [x] **4. Rich actions:** multi-action sequences, toggle / live-state buttons, OBS (obs-websocket v5), mic/speaker mute with live state, folders
 - [ ] **5. Polish:** multiple profiles, auto profile switching by focused app, dial encoder actions, live buttons (clock, CPU, now playing)

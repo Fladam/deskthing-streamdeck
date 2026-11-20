@@ -1,12 +1,27 @@
-// Strict validation for profiles coming from the configurator (or imported JSON).
+// Strict validation for profiles / settings coming from the configurator (or imported JSON).
 // Returns a cleaned copy containing only known fields; throws ValidationError otherwise.
 
 import { isValidKeyName } from "./keys";
-import { LIMITS, type ActionConfig, type ButtonConfig, type MediaKey, type PageConfig, type ProfileConfig } from "./types";
+import {
+  LIMITS,
+  type ActionConfig,
+  type Appearance,
+  type AudioDevice,
+  type AudioOp,
+  type ButtonConfig,
+  type MediaKey,
+  type OnState,
+  type PageConfig,
+  type ProfileConfig,
+  type SettingsUpdate,
+  type StepConfig,
+} from "./types";
 
 export class ValidationError extends Error {}
 
 const MEDIA_KEYS: MediaKey[] = ["playpause", "next", "previous", "stop", "volumeup", "volumedown", "mute"];
+const AUDIO_DEVICES: AudioDevice[] = ["mic", "speakers"];
+const AUDIO_OPS: AudioOp[] = ["toggle", "mute", "unmute"];
 const IMAGE_RE = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/;
 const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$/;
 
@@ -30,6 +45,12 @@ function str(v: unknown, path: string, opts: { max?: number; optional?: boolean;
 function int(v: unknown, path: string, min: number, max: number): number {
   if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) fail(path, `must be an integer ${min}-${max}`);
   return v as number;
+}
+
+function validateStep(v: unknown, path: string): StepConfig {
+  if (isObj(v) && v.type === "delay") return { type: "delay", ms: int(v.ms, `${path}.ms`, 0, LIMITS.maxDelayMs) };
+  if (isObj(v) && v.type === "multi") return fail(`${path}.type`, "multi-actions can't be nested");
+  return validateAction(v, path) as StepConfig;
 }
 
 export function validateAction(v: unknown, path = "action"): ActionConfig {
@@ -75,9 +96,53 @@ export function validateAction(v: unknown, path = "action"): ActionConfig {
       if (v.target === "next" || v.target === "previous") return { type: "page", target: v.target };
       return { type: "page", target: int(v.target, `${path}.target`, 0, LIMITS.maxPages - 1) };
     }
+    case "folder":
+      return { type: "folder", folderId: str(v.folderId, `${path}.folderId`, { max: 64, nonEmpty: true })! };
+    case "back":
+      return { type: "back" };
+    case "obs":
+      switch (v.op) {
+        case "scene":
+          return { type: "obs", op: "scene", scene: str(v.scene, `${path}.scene`, { max: 200, nonEmpty: true })! };
+        case "mute":
+          return { type: "obs", op: "mute", input: str(v.input, `${path}.input`, { max: 200, nonEmpty: true })! };
+        case "record":
+        case "stream":
+        case "virtualcam":
+          return { type: "obs", op: v.op };
+        default:
+          return fail(`${path}.op`, `unknown OBS operation "${String(v.op)}"`);
+      }
+    case "audio":
+      if (!AUDIO_DEVICES.includes(v.device as AudioDevice)) fail(`${path}.device`, 'must be "mic" or "speakers"');
+      if (!AUDIO_OPS.includes(v.op as AudioOp)) fail(`${path}.op`, `must be one of ${AUDIO_OPS.join(", ")}`);
+      return { type: "audio", device: v.device as AudioDevice, op: v.op as AudioOp };
+    case "multi": {
+      if (!Array.isArray(v.steps) || v.steps.length === 0 || v.steps.length > LIMITS.maxSteps)
+        fail(`${path}.steps`, `must have 1-${LIMITS.maxSteps} steps`);
+      return { type: "multi", steps: (v.steps as unknown[]).map((s, i) => validateStep(s, `${path}.steps[${i}]`)) };
+    }
     default:
       return fail(`${path}.type`, `unknown action type "${String(v.type)}"`);
   }
+}
+
+function validateAppearance(v: Record<string, unknown>, path: string): Appearance {
+  const a: Appearance = {};
+  const label = str(v.label, `${path}.label`, { max: LIMITS.maxLabel, optional: true });
+  const icon = str(v.icon, `${path}.icon`, { max: LIMITS.maxIcon, optional: true });
+  const image = str(v.image, `${path}.image`, { max: LIMITS.maxImage, optional: true });
+  const color = str(v.color, `${path}.color`, { max: 20, optional: true });
+  const textColor = str(v.textColor, `${path}.textColor`, { max: 20, optional: true });
+  if (image && !IMAGE_RE.test(image)) fail(`${path}.image`, "must be a base64 image data URL");
+  if (color && !COLOR_RE.test(color)) fail(`${path}.color`, "must be a hex or named color");
+  if (textColor && !COLOR_RE.test(textColor)) fail(`${path}.textColor`, "must be a hex or named color");
+  if (label) a.label = label;
+  if (icon) a.icon = icon;
+  if (image) a.image = image;
+  if (color) a.color = color;
+  if (textColor) a.textColor = textColor;
+  return a;
 }
 
 function validateButton(v: unknown, path: string, ids: Set<string>): ButtonConfig | null {
@@ -87,21 +152,24 @@ function validateButton(v: unknown, path: string, ids: Set<string>): ButtonConfi
   if (ids.has(id)) fail(`${path}.id`, `duplicate id "${id}"`);
   ids.add(id);
 
-  const b: ButtonConfig = { id, action: validateAction(v.action, `${path}.action`) };
-  const label = str(v.label, `${path}.label`, { max: LIMITS.maxLabel, optional: true });
-  const icon = str(v.icon, `${path}.icon`, { max: LIMITS.maxIcon, optional: true });
-  const image = str(v.image, `${path}.image`, { max: LIMITS.maxImage, optional: true });
-  const color = str(v.color, `${path}.color`, { max: 20, optional: true });
-  const textColor = str(v.textColor, `${path}.textColor`, { max: 20, optional: true });
-  if (image && !IMAGE_RE.test(image)) fail(`${path}.image`, "must be a base64 image data URL");
-  if (color && !COLOR_RE.test(color)) fail(`${path}.color`, "must be a hex or named color");
-  if (textColor && !COLOR_RE.test(textColor)) fail(`${path}.textColor`, "must be a hex or named color");
-  if (label) b.label = label;
-  if (icon) b.icon = icon;
-  if (image) b.image = image;
-  if (color) b.color = color;
-  if (textColor) b.textColor = textColor;
+  const b: ButtonConfig = { id, ...validateAppearance(v, path), action: validateAction(v.action, `${path}.action`) };
+  if (v.onState !== undefined && v.onState !== null) {
+    if (!isObj(v.onState)) fail(`${path}.onState`, "must be an object");
+    const os = v.onState as Record<string, unknown>;
+    const onState: OnState = validateAppearance(os, `${path}.onState`);
+    if (os.action !== undefined && os.action !== null) onState.action = validateAction(os.action, `${path}.onState.action`);
+    b.onState = onState;
+  }
   return b;
+}
+
+/** Every action in a button, including on-state actions and multi-action steps. */
+export function* actionsOf(b: ButtonConfig): Generator<ActionConfig | StepConfig> {
+  for (const a of [b.action, b.onState?.action]) {
+    if (!a) continue;
+    yield a;
+    if (a.type === "multi") yield* a.steps;
+  }
 }
 
 export function validateProfile(v: unknown): ProfileConfig {
@@ -110,28 +178,60 @@ export function validateProfile(v: unknown): ProfileConfig {
   const rows = int(v.rows, "rows", LIMITS.minRows, LIMITS.maxRows);
   if (!Array.isArray(v.pages) || v.pages.length === 0 || v.pages.length > LIMITS.maxPages)
     fail("pages", `must have 1-${LIMITS.maxPages} pages`);
+  const rawFolders = v.folders ?? [];
+  if (!Array.isArray(rawFolders) || rawFolders.length > LIMITS.maxFolders)
+    fail("folders", `must be a list of at most ${LIMITS.maxFolders} folders`);
 
   const slots = cols * rows;
   const buttonIds = new Set<string>();
-  const pageIds = new Set<string>();
-  const pages: PageConfig[] = (v.pages as unknown[]).map((p, pi) => {
-    const path = `pages[${pi}]`;
+  const viewIds = new Set<string>();
+  const validatePage = (p: unknown, path: string): PageConfig => {
     if (!isObj(p)) return fail(path, "must be an object");
     const id = str(p.id, `${path}.id`, { max: 64, nonEmpty: true })!;
-    if (pageIds.has(id)) fail(`${path}.id`, `duplicate id "${id}"`);
-    pageIds.add(id);
+    if (viewIds.has(id)) fail(`${path}.id`, `duplicate id "${id}"`);
+    viewIds.add(id);
     if (!Array.isArray(p.buttons) || p.buttons.length > slots) fail(`${path}.buttons`, `must be a list of at most ${slots} slots`);
     const buttons = Array.from({ length: slots }, (_, i) =>
       validateButton((p.buttons as unknown[])[i], `${path}.buttons[${i}]`, buttonIds)
     );
     return { id, name: str(p.name, `${path}.name`, { max: LIMITS.maxLabel, nonEmpty: true })!, buttons };
-  });
+  };
 
-  return {
+  const pages = (v.pages as unknown[]).map((p, i) => validatePage(p, `pages[${i}]`));
+  const folders = (rawFolders as unknown[]).map((p, i) => validatePage(p, `folders[${i}]`));
+
+  // Every folder action must point at an existing folder.
+  const folderIds = new Set(folders.map((f) => f.id));
+  for (const [kind, list] of [["pages", pages], ["folders", folders]] as const) {
+    list.forEach((pg, pi) =>
+      pg.buttons.forEach((b, bi) => {
+        if (!b) return;
+        for (const a of actionsOf(b)) {
+          if (a.type === "folder" && !folderIds.has(a.folderId))
+            fail(`${kind}[${pi}].buttons[${bi}]`, `opens a folder that doesn't exist ("${a.folderId}")`);
+        }
+      })
+    );
+  }
+
+  const profile: ProfileConfig = {
     id: str(v.id, "id", { max: 64, nonEmpty: true })!,
     name: str(v.name, "name", { max: LIMITS.maxLabel, nonEmpty: true })!,
     cols,
     rows,
     pages,
   };
+  if (folders.length) profile.folders = folders;
+  return profile;
+}
+
+export function validateSettingsUpdate(v: unknown): SettingsUpdate {
+  if (!isObj(v) || !isObj(v.obs)) return fail("settings", "must contain obs settings");
+  const o = v.obs;
+  if (typeof o.enabled !== "boolean") fail("obs.enabled", "must be true or false");
+  const host = str(o.host, "obs.host", { max: 253, nonEmpty: true })!.trim();
+  if (!/^[a-zA-Z0-9.\-:[\]]+$/.test(host)) fail("obs.host", "must be a hostname or IP address");
+  const update: SettingsUpdate = { obs: { enabled: o.enabled as boolean, host, port: int(o.port, "obs.port", 1, 65535) } };
+  if (o.password !== undefined) update.obs.password = str(o.password, "obs.password", { max: 200 }) ?? "";
+  return update;
 }

@@ -1,0 +1,19 @@
+{
+  "id": "streamdeck",
+  "isWebApp": true,
+  "requires": [],
+  "label": "StreamDeck",
+  "version": "0.2.0",
+  "version_code": 2,
+  "compatible_server": [11],
+  "compatible_client": [11],
+  "description": "A Stream Deck-style button grid: hotkeys, app launching, media controls, scripts and more.",
+  "author": "",
+  "platforms": ["windows"],
+  "homepage": "",
+  "repository": "",
+  "tags": ["utility", "productivity"],
+  "requiredVersions": { "server": ">=0.11.0", "client": ">=0.11.0" },
+  "updateUrl": "",
+  "template": "base"
+}

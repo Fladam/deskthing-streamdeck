@@ -6,6 +6,13 @@ import type { ActionConfig, ActionType } from "../shared/types";
 import { inputHelper } from "./win/input";
 import { keyNameToVk, MEDIA_VK } from "../shared/keys";
 
+/** Order-independent combo signature with key aliases collapsed (keys that share a VK code). */
+const comboSignature = (keys: string[]) => [...new Set(keys.map(keyNameToVk))].sort((a, b) => a - b).join(",");
+const LOCK_SIGNATURES = new Set([comboSignature(["WIN", "L"]), comboSignature(["RWIN", "L"])]);
+const SAS_SIGNATURES = new Set(["CTRL", "LCTRL", "RCTRL"].flatMap((c) =>
+  ["ALT", "LALT", "RALT"].map((a) => comboSignature([c, a, "DELETE"]))
+));
+
 type Executor<T extends ActionType> = (action: Extract<ActionConfig, { type: T }>) => Promise<void>;
 
 /** Start a process fully detached from the DeskThing server and resolve once it has spawned. */
@@ -30,6 +37,10 @@ const executors:{ [K in Exclude<ActionType, "page">]: Executor<K> } = {
   none: async () => {},
 
   hotkey: async ({ keys }) => {
+    const sig = comboSignature(keys);
+    // Windows handles these itself and ignores synthesized input for them.
+    if (LOCK_SIGNATURES.has(sig)) return inputHelper.lockWorkstation();
+    if (SAS_SIGNATURES.has(sig)) throw new Error("Windows doesn't let apps send Ctrl+Alt+Del");
     await inputHelper.sendKeys(keys.map(keyNameToVk));
   },
 

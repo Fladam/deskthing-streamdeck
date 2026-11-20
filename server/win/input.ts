@@ -16,6 +16,8 @@ public static class SDInput {
   [StructLayout(LayoutKind.Explicit)] struct UNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
   [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public UNION u; }
   [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int size);
+  [DllImport("user32.dll", SetLastError = true)] static extern bool LockWorkStation();
+  public static void Lock() { if (!LockWorkStation()) throw new Exception("LockWorkStation failed (" + Marshal.GetLastWin32Error() + ")"); }
   const uint KEYUP = 0x2, UNICODE = 0x4, EXTENDED = 0x1;
   static INPUT Key(ushort vk, ushort scan, uint flags) { var i = new INPUT(); i.type = 1; i.u.ki.wVk = vk; i.u.ki.wScan = scan; i.u.ki.dwFlags = flags; return i; }
   static bool IsExtended(ushort vk) { return (vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E || vk == 0x5B || vk == 0x5C || vk == 0x6F || (vk >= 0xA6 && vk <= 0xB7); }
@@ -40,6 +42,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
   try {
     switch ($parts[1]) {
       'KEYS' { [SDInput]::Combo([uint16[]]($parts[2].Split(','))) }
+      'LOCK' { [SDInput]::Lock() }
       'TEXT' { [SDInput]::Text([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[2]))) }
       default { throw "Unknown command $($parts[1])" }
     }
@@ -156,6 +159,11 @@ class InputHelper {
   typeText(text: string) {
     if (!text) return Promise.resolve();
     return this.exec(`TEXT ${Buffer.from(text, "utf8").toString("base64")}`);
+  }
+
+  /** Lock the PC. Windows ignores a synthesized Win+L, so this calls LockWorkStation directly. */
+  lockWorkstation() {
+    return this.exec("LOCK");
   }
 
   stop() {
